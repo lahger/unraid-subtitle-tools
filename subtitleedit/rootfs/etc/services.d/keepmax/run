@@ -1,0 +1,15 @@
+#!/bin/sh
+set -u
+# Subtitle Edit moves/un-maximizes its main window after startup and while
+# dialogs are open, leaving it shifted inside the remote desktop.
+# Snap it back to fill the screen.
+export DISPLAY=:0
+while true; do
+    wmctrl -lG 2>/dev/null | grep " - Subtitle Edit v" | while read -r id _ x y _; do
+        if [ "$x" -gt 2 ] || [ "$y" -gt 2 ]; then
+            wmctrl -i -r "$id" -b add,maximized_vert,maximized_horz
+            wmctrl -i -r "$id" -e 0,0,0,"${DISPLAY_WIDTH:-1920}","${DISPLAY_HEIGHT:-1080}"
+        fi
+    done
+    sleep 1
+done

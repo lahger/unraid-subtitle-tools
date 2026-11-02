@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>SubtitleEdit</Name>
+  <Repository>ghcr.io/lahger/subtitleedit-nvidia:latest</Repository>
+  <Registry>https://github.com/lahger/unraid-subtitle-tools/pkgs/container/subtitleedit-nvidia</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/lahger/unraid-subtitle-tools/issues</Support>
+  <Project>https://github.com/SubtitleEdit/subtitleedit</Project>
+  <TemplateURL>https://raw.githubusercontent.com/lahger/unraid-subtitle-tools/main/subtitleedit/subtitleedit-nvidia.xml</TemplateURL>
+  <Overview>Subtitle Edit by Nikolaj Olsson (Nikse) - native Linux build of v5 - in a browser desktop, with NVIDIA CUDA for Whisper speech-to-text, OCR and ffmpeg. Unofficial container, not affiliated with the Subtitle Edit project. Requires the Nvidia Driver plugin.</Overview>
+  <Category>MediaApp:Video Tools:</Category>
+  <WebUI>http://[IP]:[PORT:5800]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/SubtitleEdit/subtitleedit/main/installer/flatpak/icons/dk.nikse.subtitleedit-128.png</Icon>
+  <ExtraParams>--runtime=nvidia --shm-size=1g</ExtraParams>
+  <Config Name="Web UI" Target="5800" Default="5800" Mode="tcp" Description="Browser access" Type="Port" Display="always" Required="true" Mask="false">5800</Config>
+  <Config Name="VNC" Target="5900" Default="5900" Mode="tcp" Description="Optional VNC client access" Type="Port" Display="advanced" Required="false" Mask="false">5900</Config>
+  <Config Name="AppData" Target="/config" Default="/mnt/user/appdata/subtitleedit" Mode="rw" Description="Settings, dictionaries, downloaded Whisper engines and models" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/subtitleedit</Config>
+  <Config Name="Input folder" Target="/input" Default="/mnt/user/media" Mode="rw" Description="Videos and subtitles to work on. The Open dialogs start here." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+  <Config Name="Output folder" Target="/output" Default="/mnt/user/media/subtitles" Mode="rw" Description="Default save location: Save As, Whisper results, batch convert, burn-in and text-to-speech output go here." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media/subtitles</Config>
+  <Config Name="DEFAULT_FOLDERS" Target="DEFAULT_FOLDERS" Default="1" Mode="" Description="1 = reset Subtitle Edit's save/output folders to /output on every start. 0 = choose folders yourself in the app." Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="all" Mode="" Description="GPU UUID from the Nvidia Driver plugin, or 'all'" Type="Variable" Display="always" Required="true" Mask="false">all</Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="all" Mode="" Description="" Type="Variable" Display="advanced" Required="true" Mask="false">all</Config>
+  <Config Name="USER_ID" Target="USER_ID" Default="99" Mode="" Description="" Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="GROUP_ID" Target="GROUP_ID" Default="100" Mode="" Description="" Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="000" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">000</Config>
+  <Config Name="DISPLAY_WIDTH" Target="DISPLAY_WIDTH" Default="1920" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">1920</Config>
+  <Config Name="DISPLAY_HEIGHT" Target="DISPLAY_HEIGHT" Default="1080" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">1080</Config>
+  <Config Name="KEEP_APP_RUNNING" Target="KEEP_APP_RUNNING" Default="1" Mode="" Description="Restart Subtitle Edit if it's closed" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="WEB_AUTHENTICATION" Target="WEB_AUTHENTICATION" Default="0" Mode="" Description="Set 1 and add WEB_AUTHENTICATION_USERNAME/PASSWORD to password-protect the web UI" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+</Container>

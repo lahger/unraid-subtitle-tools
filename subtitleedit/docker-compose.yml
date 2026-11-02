@@ -1,0 +1,26 @@
+services:
+  subtitleedit:
+    image: ghcr.io/lahger/subtitleedit-nvidia:latest
+    # build: .   # or build it yourself from this folder
+    container_name: subtitleedit
+    runtime: nvidia
+    ports:
+      - "5800:5800"   # web UI
+      - "5900:5900"   # VNC (optional)
+    environment:
+      - USER_ID=99
+      - GROUP_ID=100
+      - UMASK=000
+      - TZ=Europe/Stockholm
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+      - KEEP_APP_RUNNING=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DEFAULT_FOLDERS=1   # 0 = don't touch SE's folder settings
+    volumes:
+      - /mnt/user/appdata/subtitleedit:/config
+      - /mnt/user/media:/input             # Open dialogs start here
+      - /mnt/user/media/subtitles:/output  # default save/output location
+    shm_size: 1gb
+    restart: unless-stopped

@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>mkv-autosub</Name>
+  <Repository>ghcr.io/lahger/mkv-autosub:latest</Repository>
+  <Registry>https://github.com/lahger/unraid-subtitle-tools/pkgs/container/mkv-autosub</Registry>
+  <Support>https://github.com/lahger/unraid-subtitle-tools/issues</Support>
+  <Project>https://github.com/lahger/unraid-subtitle-tools/tree/main/mkv-autosub</Project>
+  <TemplateURL>https://raw.githubusercontent.com/lahger/unraid-subtitle-tools/main/mkv-autosub/mkv-autosub.xml</TemplateURL>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Overview>Watches a folder for MakeMKV rips. Keeps the video, the first audio track and any Swedish audio, OCRs the English and Swedish Blu-ray (PGS) subtitles to SRT with Subtitle Edit's command-line tool (via Ollama, with Tesseract as fallback), and remuxes everything into one .mkv. Uses Subtitle Edit (by Nikolaj Olsson) and MKVToolNix; unofficial, not affiliated with either project.</Overview>
+  <Category>MediaApp:Video Tools:</Category>
+  <Icon>https://raw.githubusercontent.com/SubtitleEdit/subtitleedit/main/installer/flatpak/icons/dk.nikse.subtitleedit-128.png</Icon>
+  <Config Name="Watch folder" Target="/watch" Default="/mnt/user/MakeMKV/output" Mode="rw" Description="Where MakeMKV writes its rips. Processed files are moved to done/ (or failed/) inside this folder." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/MakeMKV/output</Config>
+  <Config Name="Output folder" Target="/output" Default="/mnt/user/MakeMKV/finished" Mode="rw" Description="Finished .mkv files (same sub-folder as the rip)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/MakeMKV/finished</Config>
+  <Config Name="OLLAMA_URL" Target="OLLAMA_URL" Default="http://192.168.1.10:11434" Mode="" Description="Your Ollama container: http://YOUR-UNRAID-IP:11434 (change the IP)" Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.10:11434</Config>
+  <Config Name="OLLAMA_MODEL" Target="OLLAMA_MODEL" Default="qwen2.5vl:7b" Mode="" Description="Vision model used for OCR (pull it in the ollama container first)" Type="Variable" Display="always" Required="true" Mask="false">qwen2.5vl:7b</Config>
+  <Config Name="OCR_ENGINE" Target="OCR_ENGINE" Default="ollama" Mode="" Description="ollama | tesseract | nocr" Type="Variable" Display="advanced" Required="true" Mask="false">ollama</Config>
+  <Config Name="OCR_FALLBACK" Target="OCR_FALLBACK" Default="tesseract" Mode="" Description="Engine to retry with if the main one fails. Empty = no fallback." Type="Variable" Display="advanced" Required="false" Mask="false">tesseract</Config>
+  <Config Name="SUB_LANGS" Target="SUB_LANGS" Default="eng,swe" Mode="" Description="Subtitle languages to OCR (Matroska 3-letter codes)" Type="Variable" Display="advanced" Required="true" Mask="false">eng,swe</Config>
+  <Config Name="AUDIO_LANGS" Target="AUDIO_LANGS" Default="swe" Mode="" Description="Audio languages kept in addition to the first audio track" Type="Variable" Display="advanced" Required="false" Mask="false">swe</Config>
+  <Config Name="DEFAULT_SUB_LANG" Target="DEFAULT_SUB_LANG" Default="eng" Mode="" Description="SRT language marked as default. Empty = none." Type="Variable" Display="advanced" Required="false" Mask="false">eng</Config>
+  <Config Name="OUTPUT_SUFFIX" Target="OUTPUT_SUFFIX" Default="-REMUX" Mode="" Description="Added before .mkv in the output file name (Movie-REMUX.mkv). Empty = keep the original name." Type="Variable" Display="always" Required="false" Mask="false">-REMUX</Config>
+  <Config Name="KEEP_PGS" Target="KEEP_PGS" Default="1" Mode="" Description="1 = also keep the original image subtitles of the chosen languages, 0 = SRT only" Type="Variable" Display="advanced" Required="true" Mask="false">1</Config>
+  <Config Name="STABLE_MINUTES" Target="STABLE_MINUTES" Default="5" Mode="" Description="Only process a rip once it hasn't changed for this many minutes (MakeMKV finished writing)" Type="Variable" Display="advanced" Required="true" Mask="false">5</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="" Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="" Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+</Container>

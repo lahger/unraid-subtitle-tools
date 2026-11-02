@@ -1,0 +1,3 @@
+# Exported images (published to ghcr.io instead)
+*.tar.gz
+.DS_Store
