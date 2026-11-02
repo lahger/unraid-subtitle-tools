@@ -52,8 +52,11 @@ RUN set-cont-env APP_NAME "Subtitle Edit" && \
     set-cont-env APP_VERSION "${SE_VERSION#v}" && \
     chmod +x /startapp.sh /etc/cont-init.d/*.sh /etc/services.d/keepmax/run
 
+# WEB_AUDIO: stream sound to the browser. The video player also needs an audio
+# device to play back at all, so this is on by default.
 ENV INPUT_DIR=/input \
     OUTPUT_DIR=/output \
-    DEFAULT_FOLDERS=1
+    DEFAULT_FOLDERS=1 \
+    WEB_AUDIO=1
 
 VOLUME ["/config", "/input", "/output"]

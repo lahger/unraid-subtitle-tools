@@ -51,3 +51,9 @@ to put it in `/output`.
   `docker exec SubtitleEdit nvidia-smi`.
 - Video preview uses libmpv inside a VNC session, so playback is software-rendered. That's
   expected; the GPU is used for transcription, OCR and ffmpeg (NVENC/NVDEC).
+
+## Sound and video playback
+`WEB_AUDIO=1` (the default) streams sound to the browser: click the speaker icon in the web UI's side
+panel to hear it. The video player also needs this audio device to play back at all, so leave it on
+unless you don't use the player. Playback runs over the remote desktop, so it's fine for timing
+subtitles but not smooth like a real player; a lower `DISPLAY_WIDTH`/`DISPLAY_HEIGHT` helps.

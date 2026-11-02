@@ -27,6 +27,7 @@
   <Config Name="UMASK" Target="UMASK" Default="000" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">000</Config>
   <Config Name="DISPLAY_WIDTH" Target="DISPLAY_WIDTH" Default="1920" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">1920</Config>
   <Config Name="DISPLAY_HEIGHT" Target="DISPLAY_HEIGHT" Default="1080" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">1080</Config>
+  <Config Name="WEB_AUDIO" Target="WEB_AUDIO" Default="1" Mode="" Description="1 = play sound in the browser (click the speaker icon in the side panel). The video player needs this to play back. 0 = off." Type="Variable" Display="always" Required="false" Mask="false">1</Config>
   <Config Name="KEEP_APP_RUNNING" Target="KEEP_APP_RUNNING" Default="1" Mode="" Description="Restart Subtitle Edit if it's closed" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
   <Config Name="WEB_AUTHENTICATION" Target="WEB_AUTHENTICATION" Default="0" Mode="" Description="Set 1 and add WEB_AUTHENTICATION_USERNAME/PASSWORD to password-protect the web UI" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
 </Container>
