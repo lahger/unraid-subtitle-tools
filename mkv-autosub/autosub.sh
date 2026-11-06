@@ -29,6 +29,13 @@ OUTPUT_SUFFIX="${OUTPUT_SUFFIX--REMUX}"
 SCAN_INTERVAL="${SCAN_INTERVAL:-60}"
 # Fix-common-errors rules; the excluded ones would join the disc's two-line subtitles.
 FCE_RULES="${FCE_RULES:-all,-FixShortLines,-FixShortLinesAll,-FixShortLinesPixelWidth}"
+# Subtitle tracks that aren't tagged with a SUB_LANGS language:
+#   all      = also take untagged tracks, and every track if none is tagged right (default)
+#   detected = same, but keep only those whose text turns out to be a SUB_LANGS language
+#   none     = only tracks tagged with a SUB_LANGS language
+SUB_UNMATCHED="${SUB_UNMATCHED:-all}"
+# Languages the quick detection pass can read (Tesseract packs installed in the image).
+DETECT_LANGS="${DETECT_LANGS:-eng,swe,dan,nor,fin}"
 
 log() { echo "[$(date '+%F %T')] $*"; }
 
@@ -49,19 +56,47 @@ tess_lang() {
         nor|nob) echo nor ;; *) echo "$1" ;;
     esac
 }
+# Language detected from text (seconv info, ISO 639-1) -> Matroska code.
+iso3() {
+    case "$1" in
+        en) echo eng ;; sv) echo swe ;; da) echo dan ;; no|nb|nn) echo nor ;; fi) echo fin ;;
+        de) echo ger ;; fr) echo fre ;; es) echo spa ;; it) echo ita ;;  nl) echo dut ;;
+        pt) echo por ;; pl) echo pol ;; is) echo ice ;; *) echo und ;;
+    esac
+}
+in_list() { [[ ",$2," == *",$1,"* ]]; }   # in_list swe "eng,swe"
+# "eng,swe" -> "eng+swe" (Tesseract) or "English or Swedish" (Ollama prompt)
+tess_list() { local l out=(); for l in ${1//,/ }; do out+=("$(tess_lang "$l")"); done; (IFS=+; echo "${out[*]}"); }
+name_list() { local l out=""; for l in ${1//,/ }; do out="${out:+$out or }$(lang_name "$l")"; done; echo "$out"; }
 
-# ocr <engine> <input.sup> <lang> <output.srt>
+# detect_lang <input.sup> -> Matroska language code, or "und"
+# Quick multi-language Tesseract pass; only used to read the language from the text.
+detect_lang() {
+    local sup="$1" dir code
+    dir="$(dirname "$sup")"
+    seconv "$sup" subrip --ocr-engine:tesseract --ocr-language:"$(tess_list "$DETECT_LANGS")" \
+        --output-folder:"$dir" --output-filename:detect.srt --overwrite --quiet </dev/null >/dev/null 2>&1 \
+        || { echo und; return; }
+    code="$(seconv info "$dir/detect.srt" --json </dev/null 2>/dev/null | jq -r '.language // empty' 2>/dev/null)"
+    rm -f "$dir/detect.srt"
+    iso3 "$code"
+}
+
+# ocr <engine> <input.sup> <lang> <output.srt>   (lang "und" = unknown)
 ocr() {
-    local engine="$1" sup="$2" lang="$3" srt="$4" name
-    name="$(lang_name "$lang")"
+    local engine="$1" sup="$2" lang="$3" srt="$4" name tl fce=()
+    if [ "$lang" = und ]; then
+        name="$(name_list "$SUB_LANGS")"; tl="$(tess_list "$SUB_LANGS")"
+    else
+        name="$(lang_name "$lang")"; tl="$(tess_lang "$lang")"; fce=(--fce-language:"$name")
+    fi
     local args=("$sup" subrip
         --output-folder:"$(dirname "$srt")" --output-filename:"$(basename "$srt")" --overwrite
-        --fix-common-errors-rules:"$FCE_RULES" --fce-language:"$name" --dictionary-folder:"$DICT" --quiet)
+        --fix-common-errors-rules:"$FCE_RULES" "${fce[@]}" --dictionary-folder:"$DICT" --quiet)
     case "$engine" in
         ollama)    args+=(--ocr-engine:ollama --ollama-url:"${OLLAMA_URL%/}/api/chat"
                           --ollama-model:"$OLLAMA_MODEL" --ocr-language:"$name") ;;
-        tesseract) args+=(--ocr-engine:tesseract --ocr-language:"$(tess_lang "$lang")") ;;
-        *)         args+=(--ocr-engine:"$engine" --ocr-language:"$(tess_lang "$lang")") ;;
+        *)         args+=(--ocr-engine:"$engine" --ocr-language:"$tl") ;;
     esac
     rm -f "$srt"
     seconv "${args[@]}" </dev/null || return 1
@@ -100,20 +135,32 @@ process() {
         | map(select(. != null)) | unique | join(",")' <<<"$json")"
     log "video tracks: ${video_ids:-none}, audio tracks kept: ${audio_ids:-none}"
 
-    # Selected image subtitles as lines: id<TAB>lang<TAB>forced(0/1)
+    # Image subtitles to process, as lines: id<TAB>tagged language<TAB>forced(0/1)
+    #   - per SUB_LANGS language: the first full and the first forced track
+    #   - SUB_UNMATCHED=all|detected: also every untagged ("und") track, and every
+    #     track at all if none matched (discs often mislabel or don't tag subtitles)
     local subs
-    subs="$(jq -r --arg langs "$SUB_LANGS" '
+    subs="$(jq -r --arg langs "$SUB_LANGS" --arg unmatched "$SUB_UNMATCHED" '
         ($langs | split(",")) as $want
         | [.tracks[] | select(.type=="subtitles"
                               and (.properties.codec_id == "S_HDMV/PGS" or .properties.codec_id == "S_VOBSUB"))] as $s
-        | $want[] as $lang
-        | ([$s[] | select(.properties.language == $lang and (.properties.forced_track | not))][0],
-           [$s[] | select(.properties.language == $lang and .properties.forced_track)][0])
-        | select(. != null)
-        | "\(.id)\t\($lang)\t\(if .properties.forced_track then 1 else 0 end)"' <<<"$json")"
+        | [$want[] as $lang
+           | ([$s[] | select(.properties.language == $lang and (.properties.forced_track | not))][0],
+              [$s[] | select(.properties.language == $lang and .properties.forced_track)][0])
+           | select(. != null)] as $matched
+        | [$s[] | select((.properties.language // "und") == "und")] as $und
+        | (if $unmatched == "none" then $matched
+           elif ($matched | length) == 0 then $s
+           else $matched + $und end)
+        | unique_by(.id)[]
+        | "\(.id)\t\(.properties.language // "und")\t\(if .properties.forced_track then 1 else 0 end)"' <<<"$json")"
 
     if [ -z "$subs" ]; then
         log "no $SUB_LANGS image subtitles found; remuxing audio/video only"
+    elif ! jq -e --arg langs "$SUB_LANGS" '($langs | split(",")) as $w
+            | any(.tracks[]; .type=="subtitles" and ((.properties.language // "und") as $l | $w | index($l)))' \
+            <<<"$json" >/dev/null; then
+        log "no subtitle track is tagged $SUB_LANGS; taking all $(wc -l <<<"$subs" | tr -d ' ') image subtitle tracks"
     fi
 
     # Extract all chosen subtitle tracks in one pass over the file.
@@ -133,11 +180,23 @@ process() {
         engine="$OCR_FALLBACK"
         log "using $engine for this file instead"
     fi
-    local srt_files=() srt_langs=() srt_forced=()
-    while IFS=$'\t' read -r id lang forced; do
+    # Per processed track: source id, final language, forced flag, SRT file.
+    local sub_ids=() sub_langs=() sub_forced=() srt_files=() tagged detected
+    while IFS=$'\t' read -r id tagged forced; do
         [ -n "$id" ] || continue
+        lang="$tagged"
+        if ! in_list "$tagged" "$SUB_LANGS"; then
+            # Untagged or other language: read the real language from the text first.
+            detected="$(detect_lang "$job/$id.sup")"
+            [ "$detected" != und ] && lang="$detected"
+            log "track $id is tagged '$tagged', text looks $([ "$detected" = und ] && echo 'unrecognised' || lang_name "$detected")"
+            if [ "$SUB_UNMATCHED" = detected ] && ! in_list "$lang" "$SUB_LANGS"; then
+                log "skipping track $id ($(lang_name "$lang") is not in $SUB_LANGS)"
+                continue
+            fi
+        fi
         local srt="$job/$id.$lang.srt"
-        log "OCR track $id ($lang$([ "$forced" = 1 ] && echo ', forced')) with $engine"
+        log "OCR track $id ($(lang_name "$lang")$([ "$forced" = 1 ] && echo ', forced')) with $engine"
         if ! ocr "$engine" "$job/$id.sup" "$lang" "$srt"; then
             if [ -n "$OCR_FALLBACK" ] && [ "$OCR_FALLBACK" != "$engine" ]; then
                 log "$engine failed, retrying track $id with $OCR_FALLBACK"
@@ -147,8 +206,18 @@ process() {
             fi
         fi
         log "track $id: $(grep -c -- '-->' "$srt") subtitles"
-        srt_files+=("$srt"); srt_langs+=("$lang"); srt_forced+=("$forced")
+        sub_ids+=("$id"); sub_langs+=("$lang"); sub_forced+=("$forced"); srt_files+=("$srt")
     done <<<"$subs"
+
+    # SRTs in SUB_LANGS order (then the rest), keeping disc order within a language.
+    local i rank sorted=()
+    for i in "${!sub_ids[@]}"; do
+        rank=$(( $(tr ',' '\n' <<<"$SUB_LANGS" | grep -nx -- "${sub_langs[$i]}" | cut -d: -f1 | head -1) + 0 ))
+        [ "$rank" -eq 0 ] && rank=99
+        sorted+=("$rank $i")
+    done
+    mapfile -t sorted < <(printf '%s\n' "${sorted[@]}" | sort -n -s -k1,1 | cut -d' ' -f2)
+    [ ${#sub_ids[@]} -gt 0 ] || sorted=()
 
     # Remux. Order: video, audio, new SRTs, then the original image subs.
     local dest="$OUT/${rel%.*}${OUTPUT_SUFFIX}.mkv" partial
@@ -156,16 +225,15 @@ process() {
     mkdir -p "$(dirname "$dest")" || return 1
     if [ -e "$dest" ]; then log "output already exists: $dest"; return 1; fi
 
-    local args=(-o "$partial") order=() t
+    local args=(-o "$partial") order=() t label
     [ -n "$audio_ids" ] && args+=(-a "$audio_ids") || args+=(-A)
-    if [ "$KEEP_PGS" = 1 ] && [ ${#extract[@]} -gt 0 ]; then
-        local pgs_ids
-        pgs_ids="$(cut -f1 <<<"$subs" | paste -sd, -)"
-        args+=(-s "$pgs_ids")
-        while IFS=$'\t' read -r id lang forced; do
-            args+=(--default-track-flag "$id:0"
-                   --track-name "$id:$(lang_name "$lang")$([ "$forced" = 1 ] && echo ' Forced') (PGS)")
-        done <<<"$subs"
+    if [ "$KEEP_PGS" = 1 ] && [ ${#sub_ids[@]} -gt 0 ]; then
+        args+=(-s "$(IFS=,; echo "${sub_ids[*]}")")
+        for i in "${!sub_ids[@]}"; do
+            label="$([ "${sub_langs[$i]}" = und ] && echo Unknown || lang_name "${sub_langs[$i]}")"
+            args+=(--language "${sub_ids[$i]}:${sub_langs[$i]}" --default-track-flag "${sub_ids[$i]}:0"
+                   --track-name "${sub_ids[$i]}:$label$([ "${sub_forced[$i]}" = 1 ] && echo ' Forced') (PGS)")
+        done
     else
         args+=(-S)
     fi
@@ -173,18 +241,21 @@ process() {
     for t in ${video_ids//,/ }; do order+=("0:$t"); done
     for t in ${audio_ids//,/ }; do order+=("0:$t"); done
 
-    local i default
-    for i in "${!srt_files[@]}"; do
-        lang="${srt_langs[$i]}"; forced="${srt_forced[$i]}"
+    local n=0 default default_done=0
+    for i in "${sorted[@]}"; do
+        lang="${sub_langs[$i]}"; forced="${sub_forced[$i]}"
+        label="$([ "$lang" = und ] && echo Unknown || lang_name "$lang")"
         default=0
-        [ "$lang" = "$DEFAULT_SUB_LANG" ] && [ "$forced" = 0 ] && default=1
+        if [ $default_done = 0 ] && [ "$lang" = "$DEFAULT_SUB_LANG" ] && [ "$forced" = 0 ]; then
+            default=1; default_done=1
+        fi
         args+=(--language "0:$lang" --default-track-flag "0:$default" --forced-display-flag "0:$forced"
-               --track-name "0:$(lang_name "$lang")$([ "$forced" = 1 ] && echo ' Forced')"
+               --track-name "0:$label$([ "$forced" = 1 ] && echo ' Forced')"
                "${srt_files[$i]}")
-        order+=("$((i + 1)):0")
+        n=$((n + 1)); order+=("$n:0")
     done
     if [ "$KEEP_PGS" = 1 ]; then
-        while IFS=$'\t' read -r id lang forced; do [ -n "$id" ] && order+=("0:$id"); done <<<"$subs"
+        for i in "${sorted[@]}"; do order+=("0:${sub_ids[$i]}"); done
     fi
     args+=(--track-order "$(IFS=,; echo "${order[*]}")")
 
@@ -206,7 +277,7 @@ move_to() {
     return 0
 }
 
-log "mkv-autosub watching $WATCH -> $OUT (subs: $SUB_LANGS, extra audio: $AUDIO_LANGS, OCR: $OCR_ENGINE, fallback: ${OCR_FALLBACK:-none})"
+log "mkv-autosub watching $WATCH -> $OUT (subs: $SUB_LANGS, unmatched subs: $SUB_UNMATCHED, extra audio: $AUDIO_LANGS, OCR: $OCR_ENGINE, fallback: ${OCR_FALLBACK:-none})"
 [ "$OCR_ENGINE" = ollama ] && log "Ollama: $OLLAMA_URL, model $OLLAMA_MODEL"
 if ! mkdir -p "$DONE" "$FAILED" "$WORK"; then
     log "ERROR: can't write to $WATCH or $OUT as $(id -u):$(id -g). Fix the folder owner on the host:"

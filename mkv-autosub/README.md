@@ -61,11 +61,30 @@ To build the image yourself: `docker build -t mkv-autosub:latest .` in this fold
 | `OCR_FALLBACK` | `tesseract` | used if Ollama is down, the model isn't pulled, or OCR fails; empty = mark the file failed instead |
 | `OLLAMA_MODEL` | `qwen2.5vl:7b` | any Ollama vision model |
 | `SUB_LANGS` | `eng,swe` | subtitle languages to OCR (3-letter codes as in the MKV) |
+| `SUB_UNMATCHED` | `all` | subtitle tracks that aren't tagged with a `SUB_LANGS` language, see below |
 | `AUDIO_LANGS` | `swe` | audio kept in addition to the first track |
 | `DEFAULT_SUB_LANG` | `eng` | SRT shown by default; empty = none |
 | `KEEP_PGS` | `1` | `0` = SRT only |
 | `OUTPUT_SUFFIX` | `-REMUX` | added before `.mkv` in the output name; empty = original name |
 | `STABLE_MINUTES` | `5` | how long a rip must be unchanged before it's processed |
+
+## Untagged or mislabeled subtitles
+
+Many discs (Scandinavian ones especially) don't tag their subtitle tracks, or tag them wrong. With
+`SUB_UNMATCHED=all` (the default):
+
+- tracks tagged `und` (undefined) are always taken as well, and
+- if **no** track is tagged with a `SUB_LANGS` language, **every** image subtitle track is taken.
+
+For those tracks a quick Tesseract pass first reads the language from the text (English, Swedish,
+Danish, Norwegian, Finnish; `DETECT_LANGS`), then the track is OCR'd in that language and labelled with
+it in the output, so "Swedish" ends up on the right track and English still gets the default flag.
+
+`SUB_UNMATCHED=detected` does the same but keeps only tracks whose text turns out to be a `SUB_LANGS`
+language (skips e.g. Danish and Finnish). `none` only uses tracks that are tagged correctly.
+
+Only subtitles are detected this way. Audio still uses the tags: the first audio track is always kept,
+plus tracks tagged with an `AUDIO_LANGS` language.
 
 ## Good to know
 

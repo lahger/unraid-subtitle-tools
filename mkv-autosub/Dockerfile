@@ -11,6 +11,7 @@ RUN apt-get update && \
         ca-certificates curl jq tini util-linux \
         mkvtoolnix \
         tesseract-ocr tesseract-ocr-eng tesseract-ocr-swe \
+        tesseract-ocr-dan tesseract-ocr-nor tesseract-ocr-fin \
         hunspell-en-us hunspell-sv \
         libicu74 libfontconfig1 fonts-dejavu-core && \
     rm -rf /var/lib/apt/lists/*
@@ -39,6 +40,8 @@ RUN chmod +x /usr/local/bin/autosub.sh /entrypoint.sh
 ENV WATCH_DIR=/watch \
     OUTPUT_DIR=/output \
     SUB_LANGS=eng,swe \
+    SUB_UNMATCHED=all \
+    DETECT_LANGS=eng,swe,dan,nor,fin \
     AUDIO_LANGS=swe \
     DEFAULT_SUB_LANG=eng \
     KEEP_PGS=1 \
