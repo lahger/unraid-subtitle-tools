@@ -43,6 +43,7 @@ ENV CONFIG_DIR=/config \
     SUB_LANGS=eng,swe \
     SUB_UNMATCHED=all \
     DETECT_LANGS=eng,swe,dan,nor,fin \
+    DETECT_MINUTES=30 \
     AUDIO_LANGS=swe \
     DEFAULT_SUB_LANG=eng \
     KEEP_PGS=1 \

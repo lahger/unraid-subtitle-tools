@@ -97,15 +97,30 @@ Many discs (Scandinavian ones especially) don't tag their subtitle tracks, or ta
 - tracks tagged `und` (undefined) are always taken as well, and
 - if **no** track is tagged with a `SUB_LANGS` language, **every** image subtitle track is taken.
 
-For those tracks a quick Tesseract pass first reads the language from the text (English, Swedish,
-Danish, Norwegian, Finnish; `DETECT_LANGS`), then the track is OCR'd in that language and labelled with
-it in the output, so "Swedish" ends up on the right track and English still gets the default flag.
+For those tracks a quick Tesseract pass over the first 30 minutes (`DETECT_MINUTES`) first reads the
+language from the text (English, Swedish, Danish, Norwegian, Finnish; `DETECT_LANGS`), then the whole
+track is OCR'd in that language and labelled with it in the output, so "Swedish" ends up on the right
+track and English still gets the default flag.
 
 `SUB_UNMATCHED=detected` does the same but keeps only tracks whose text turns out to be a `SUB_LANGS`
 language (skips e.g. Danish and Finnish). `none` only uses tracks that are tagged correctly.
 
 Only subtitles are detected this way. Audio still uses the tags: the first audio track is always kept,
 plus tracks tagged with an `AUDIO_LANGS` language.
+
+## Following along
+
+The container log (and `autosub.log` in appdata) shows each step, with OCR progress every 5%:
+
+```
+[2026-11-08 18:10:26] track 4 (track 1 of 4): detecting language from the first 30 minutes
+[2026-11-08 18:10:38] track 4 is tagged 'und', text looks Swedish
+[2026-11-08 18:10:38] OCR track 4 (Swedish) with ollama - track 1 of 4
+[2026-11-08 18:11:44] track 4: 5%
+[2026-11-08 18:12:51] track 4: 10%
+...
+[2026-11-08 18:31:22] track 4: 100% (1412 subtitles)
+```
 
 ## Good to know
 

@@ -42,6 +42,8 @@ FCE_RULES="${FCE_RULES:-all,-FixShortLines,-FixShortLinesAll,-FixShortLinesPixel
 SUB_UNMATCHED="${SUB_UNMATCHED:-all}"
 # Languages the quick detection pass can read (Tesseract packs installed in the image).
 DETECT_LANGS="${DETECT_LANGS:-eng,swe,dan,nor,fin}"
+# Minutes of each untagged track that are read to detect its language.
+DETECT_MINUTES="${DETECT_MINUTES:-30}"
 
 log() { echo "[$(date '+%F %T')] $*"; }
 
@@ -81,21 +83,43 @@ tess_list() { local l out=(); for l in ${1//,/ }; do out+=("$(tess_lang "$l")");
 name_list() { local l out=""; for l in ${1//,/ }; do out="${out:+$out or }$(lang_name "$l")"; done; echo "$out"; }
 
 # detect_lang <input.sup> -> Matroska language code, or "und"
-# Quick multi-language Tesseract pass; only used to read the language from the text.
+# Quick multi-language Tesseract pass over the first DETECT_MINUTES of the track;
+# only used to read the language from the text. Falls back to the whole track.
 detect_lang() {
-    local sup="$1" dir code
+    local sup="$1" dir code input
     dir="$(dirname "$sup")"
-    seconv "$sup" subrip --ocr-engine:tesseract --ocr-language:"$(tess_list "$DETECT_LANGS")" \
+    input="$dir/detect-sample.sup"
+    mkvmerge -q -o "$dir/detect-sample.mks" --split "parts:00:00:00-$(printf '%02d:%02d:00' $((DETECT_MINUTES / 60)) $((DETECT_MINUTES % 60)))" \
+        "$sup" >/dev/null 2>&1 \
+        && mkvextract "$dir/detect-sample.mks" tracks "0:$input" >/dev/null 2>&1 \
+        && [ -s "$input" ] || input="$sup"
+    seconv "$input" subrip --ocr-engine:tesseract --ocr-language:"$(tess_list "$DETECT_LANGS")" \
         --output-folder:"$dir" --output-filename:detect.srt --overwrite --quiet </dev/null >/dev/null 2>&1 \
-        || { echo und; return; }
-    code="$(seconv info "$dir/detect.srt" --json </dev/null 2>/dev/null | jq -r '.language // empty' 2>/dev/null)"
-    rm -f "$dir/detect.srt"
-    iso3 "$code"
+        && code="$(seconv info "$dir/detect.srt" --json </dev/null 2>/dev/null | jq -r '.language // empty' 2>/dev/null)"
+    rm -f "$dir/detect.srt" "$dir"/detect-sample.*
+    iso3 "${code:-}"
 }
 
-# ocr <engine> <input.sup> <lang> <output.srt>   (lang "und" = unknown)
+# Read seconv's output: log its "OCR 600/1400 (43%)" progress every 5% and keep error lines.
+ocr_progress() {
+    local label="$1" line pct next=5
+    # stdbuf: tr would otherwise hold the output back until seconv finishes.
+    stdbuf -oL tr '\r' '\n' | while IFS= read -r line; do
+        if [[ $line =~ \(([0-9]+)%\) ]]; then
+            pct="${BASH_REMATCH[1]}"
+            if [ "$pct" -ge "$next" ] && [ "$pct" -lt 100 ]; then
+                log "$label: $pct%"
+                next=$(( pct / 5 * 5 + 5 ))
+            fi
+        elif [[ $line == *"Conversion failed"* || $line == Errors:* || $line == *•* ]]; then
+            echo "$line"
+        fi
+    done
+}
+
+# ocr <engine> <input.sup> <lang> <output.srt> <progress label>   (lang "und" = unknown)
 ocr() {
-    local engine="$1" sup="$2" lang="$3" srt="$4" name tl fce=()
+    local engine="$1" sup="$2" lang="$3" srt="$4" label="$5" name tl fce=()
     if [ "$lang" = und ]; then
         name="$(name_list "$SUB_LANGS")"; tl="$(tess_list "$SUB_LANGS")"
     else
@@ -103,14 +127,14 @@ ocr() {
     fi
     local args=("$sup" subrip
         --output-folder:"$(dirname "$srt")" --output-filename:"$(basename "$srt")" --overwrite
-        --fix-common-errors-rules:"$FCE_RULES" "${fce[@]}" --dictionary-folder:"$DICT" --quiet)
+        --fix-common-errors-rules:"$FCE_RULES" "${fce[@]}" --dictionary-folder:"$DICT")
     case "$engine" in
         ollama)    args+=(--ocr-engine:ollama --ollama-url:"${OLLAMA_URL%/}/api/chat"
                           --ollama-model:"$OLLAMA_MODEL" --ocr-language:"$name") ;;
         *)         args+=(--ocr-engine:"$engine" --ocr-language:"$tl") ;;
     esac
     rm -f "$srt"
-    seconv "${args[@]}" </dev/null || return 1
+    seconv "${args[@]}" </dev/null 2>&1 | ocr_progress "$label" || return 1
     # Accept only a non-empty result with real text in it.
     [ -s "$srt" ] && grep -q -- '-->' "$srt" && [ "$(grep -cvE '^\s*$|-->|^[0-9]+\s*$' "$srt")" -gt 0 ]
 }
@@ -193,11 +217,15 @@ process() {
     fi
     # Per processed track: source id, final language, forced flag, SRT file.
     local sub_ids=() sub_langs=() sub_forced=() srt_files=() tagged detected
+    local n_tracks=0 track_no=0
+    n_tracks=$(grep -c . <<<"$subs")
     while IFS=$'\t' read -r id tagged forced; do
         [ -n "$id" ] || continue
+        track_no=$((track_no + 1))
         lang="$tagged"
         if ! in_list "$tagged" "$SUB_LANGS"; then
             # Untagged or other language: read the real language from the text first.
+            log "track $id (track $track_no of $n_tracks): detecting language from the first $DETECT_MINUTES minutes"
             detected="$(detect_lang "$job/$id.sup")"
             [ "$detected" != und ] && lang="$detected"
             log "track $id is tagged '$tagged', text looks $([ "$detected" = und ] && echo 'unrecognised' || lang_name "$detected")"
@@ -207,16 +235,16 @@ process() {
             fi
         fi
         local srt="$job/$id.$lang.srt"
-        log "OCR track $id ($(lang_name "$lang")$([ "$forced" = 1 ] && echo ', forced')) with $engine"
-        if ! ocr "$engine" "$job/$id.sup" "$lang" "$srt"; then
+        log "OCR track $id ($(lang_name "$lang")$([ "$forced" = 1 ] && echo ', forced')) with $engine - track $track_no of $n_tracks"
+        if ! ocr "$engine" "$job/$id.sup" "$lang" "$srt" "track $id"; then
             if [ -n "$OCR_FALLBACK" ] && [ "$OCR_FALLBACK" != "$engine" ]; then
                 log "$engine failed, retrying track $id with $OCR_FALLBACK"
-                ocr "$OCR_FALLBACK" "$job/$id.sup" "$lang" "$srt" || { log "OCR failed for track $id"; return 1; }
+                ocr "$OCR_FALLBACK" "$job/$id.sup" "$lang" "$srt" "track $id" || { log "OCR failed for track $id"; return 1; }
             else
                 log "OCR failed for track $id"; return 1
             fi
         fi
-        log "track $id: $(grep -c -- '-->' "$srt") subtitles"
+        log "track $id: 100% ($(grep -c -- '-->' "$srt") subtitles)"
         sub_ids+=("$id"); sub_langs+=("$lang"); sub_forced+=("$forced"); srt_files+=("$srt")
     done <<<"$subs"
 
