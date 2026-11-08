@@ -5,15 +5,19 @@
 #   2. extract those subtitles (one read of the file) and OCR them to SRT with seconv
 #   3. remux video + chosen audio + new SRTs (+ the original image subs if KEEP_PGS=1)
 #      into OUTPUT_DIR, keeping the source's sub-folder
-#   4. move the source to WATCH_DIR/done (or WATCH_DIR/failed with a log)
+#   4. remember the rip in CONFIG_DIR/processed.list (the watch folder is never written to);
+#      on failure write <name>-FAILED.log where the output would have gone
 set -uo pipefail
 
 WATCH="${WATCH_DIR:-/watch}"
 OUT="${OUTPUT_DIR:-/output}"
-DONE="${DONE_DIR:-$WATCH/done}"
-FAILED="${FAILED_DIR:-$WATCH/failed}"
-WORK="$OUT/.autosub-work"
-DICT=/opt/dictionaries
+CONFIG="${CONFIG_DIR:-/config}"
+WORK="$CONFIG/work"
+# OCR fix lists and spell-check dictionaries, editable in appdata. Seeded from the image.
+DICT="$CONFIG/dictionaries"
+LOG="$CONFIG/autosub.log"
+# Rips already handled, one "relative path|size" per line.
+PROCESSED="$CONFIG/processed.list"
 
 SUB_LANGS="${SUB_LANGS:-eng,swe}"
 AUDIO_LANGS="${AUDIO_LANGS:-swe}"
@@ -24,6 +28,8 @@ OCR_FALLBACK="${OCR_FALLBACK-tesseract}"
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
 OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5vl:7b}"
 STABLE_MINUTES="${STABLE_MINUTES:-5}"
+# What to do with the rip after a successful run: keep | delete
+SOURCE_AFTER="${SOURCE_AFTER:-keep}"
 # Added before .mkv in the output name: "Movie_t00.mkv" -> "Movie_t00-REMUX.mkv". Empty = same name.
 OUTPUT_SUFFIX="${OUTPUT_SUFFIX--REMUX}"
 SCAN_INTERVAL="${SCAN_INTERVAL:-60}"
@@ -38,6 +44,11 @@ SUB_UNMATCHED="${SUB_UNMATCHED:-all}"
 DETECT_LANGS="${DETECT_LANGS:-eng,swe,dan,nor,fin}"
 
 log() { echo "[$(date '+%F %T')] $*"; }
+
+if mkdir -p "$CONFIG" 2>/dev/null && touch "$LOG" 2>/dev/null; then
+    [ "$(stat -c %s "$LOG")" -gt 10485760 ] && mv -f "$LOG" "$LOG.1"
+    exec > >(tee -a "$LOG") 2>&1
+fi
 
 # Matroska uses ISO 639-2/B codes; map the common ones to a name (Ollama prompt,
 # Fix-common-errors language) and to Tesseract's 639-2/T traineddata name.
@@ -220,8 +231,9 @@ process() {
     [ ${#sub_ids[@]} -gt 0 ] || sorted=()
 
     # Remux. Order: video, audio, new SRTs, then the original image subs.
-    local dest="$OUT/${rel%.*}${OUTPUT_SUFFIX}.mkv" partial
-    partial="${dest%.mkv}.partial.mkv"
+    local dest partial
+    dest="$(output_path "$rel")"
+    partial="$(dirname "$dest")/.$(basename "$dest").partial"
     mkdir -p "$(dirname "$dest")" || return 1
     if [ -e "$dest" ]; then log "output already exists: $dest"; return 1; fi
 
@@ -268,37 +280,41 @@ process() {
     rm -rf "$job"
 }
 
-move_to() {
-    local src="$1" base="$2" rel="${1#"$WATCH"/}"
-    mkdir -p "$base/$(dirname "$rel")" && mv "$src" "$base/$rel"
-    # Remove the rip's now-empty folder (never WATCH itself).
-    local dir; dir="$(dirname "$src")"
-    [ "$dir" != "$WATCH" ] && rmdir "$dir" 2>/dev/null
-    return 0
-}
+output_path() { echo "$OUT/${1%.*}${OUTPUT_SUFFIX}.mkv"; }
+failed_log()  { echo "$OUT/${1%.*}${OUTPUT_SUFFIX}-FAILED.log"; }
 
-log "mkv-autosub watching $WATCH -> $OUT (subs: $SUB_LANGS, unmatched subs: $SUB_UNMATCHED, extra audio: $AUDIO_LANGS, OCR: $OCR_ENGINE, fallback: ${OCR_FALLBACK:-none})"
+log "mkv-autosub watching $WATCH -> $OUT, appdata $CONFIG (subs: $SUB_LANGS, unmatched subs: $SUB_UNMATCHED, extra audio: $AUDIO_LANGS, OCR: $OCR_ENGINE, fallback: ${OCR_FALLBACK:-none}, source after: $SOURCE_AFTER)"
 [ "$OCR_ENGINE" = ollama ] && log "Ollama: $OLLAMA_URL, model $OLLAMA_MODEL"
-if ! mkdir -p "$DONE" "$FAILED" "$WORK"; then
-    log "ERROR: can't write to $WATCH or $OUT as $(id -u):$(id -g). Fix the folder owner on the host:"
+if ! mkdir -p "$WORK" "$DICT" || ! touch "$PROCESSED" || [ ! -w "$OUT" ]; then
+    log "ERROR: can't write to $CONFIG or $OUT as $(id -u):$(id -g). Fix the folder owner on the host:"
     log "       chown $(id -u):$(id -g) <host folder>"
     exit 1
 fi
+# Add dictionaries that are new in this image without overwriting the user's edits.
+cp -r --update=none /opt/dictionaries/. "$DICT/"
 
 while true; do
-    find "$WATCH" \( -path "$DONE" -o -path "$FAILED" \) -prune -o \
-         -type f -iname '*.mkv' ! -iname '*.partial.mkv' -mmin +"$STABLE_MINUTES" -print 2>/dev/null \
+    # done/ and failed/ are where older versions moved rips; leave those alone.
+    find "$WATCH" \( -path "$WATCH/done" -o -path "$WATCH/failed" \) -prune -o \
+         -type f -iname '*.mkv' -mmin +"$STABLE_MINUTES" -print 2>/dev/null \
         | sort | while IFS= read -r f; do
         rel="${f#"$WATCH"/}"
+        key="$rel|$(stat -c %s "$f" 2>/dev/null)"
+        grep -qxF -- "$key" "$PROCESSED" && continue
+        [ -e "$(failed_log "$rel")" ] && continue   # failed before; delete the log to retry
         logfile="$WORK/current.log"
         log "=== $rel"
         if process "$f" </dev/null 2>&1 | tee "$logfile"; [ "${PIPESTATUS[0]}" -eq 0 ]; then
-            move_to "$f" "$DONE"
-            log "=== done: $rel"
+            echo "$key" >> "$PROCESSED"
+            if [ "$SOURCE_AFTER" = delete ]; then
+                rm -f -- "$f" && log "deleted the source rip"
+                # Remove the rip's now-empty folder (never WATCH itself).
+                [ "$(dirname "$f")" != "$WATCH" ] && rmdir "$(dirname "$f")" 2>/dev/null
+            fi
+            log "=== done: $rel -> $(output_path "$rel")"
         else
-            move_to "$f" "$FAILED"
-            cp "$logfile" "$FAILED/${rel%.mkv}.log" 2>/dev/null
-            log "=== FAILED: $rel (moved to failed/, see the .log next to it)"
+            mkdir -p "$(dirname "$(failed_log "$rel")")" && cp "$logfile" "$(failed_log "$rel")"
+            log "=== FAILED: $rel (see $(failed_log "$rel"); delete that log to retry)"
         fi
     done
     sleep "$SCAN_INTERVAL"

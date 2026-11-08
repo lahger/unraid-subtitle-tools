@@ -14,9 +14,17 @@ binhex-makemkv ──rip──▶ /watch/<Disc>/<title>.mkv
                  OCR English & Swedish PGS subs ──▶ SRT   (Ollama AI, Tesseract fallback)
                  remux: video, audio, SRTs, original PGS
                               │
-                              ├──▶ /output/<Disc>/<title>-REMUX.mkv  finished file
-                              └──▶ /watch/done/<Disc>/<title>.mkv  source (delete when happy)
+                              ├──▶ /output/<Disc>/<title>-REMUX.mkv     finished file
+                              └──▶ /config/processed.list              rip remembered
 ```
+
+The watch folder is only read, never written to: the rip stays where MakeMKV put it (or is deleted
+after a successful run with `SOURCE_AFTER=delete`).
+
+## Requirements
+
+- An **Ollama** container (e.g. *ollama* from Community Apps, with the GPU passed through) with a vision
+  model pulled. Without Ollama, set `OCR_ENGINE=tesseract`; nothing else is needed then.
 
 ## What ends up in the file
 
@@ -34,15 +42,18 @@ Other subtitle tracks (other languages, commentary) and other audio are dropped.
 
 ## Install on Unraid
 
-1. Pull the vision model in your **ollama** container (its console, or):
+1. Pull a vision model in your **ollama** container (its console, or):
    ```bash
-   docker exec ollama ollama pull qwen2.5vl:7b
+   docker exec ollama ollama pull qwen2.5vl:3b
    ```
+   `qwen2.5vl:3b` needs about half the GPU memory of `qwen2.5vl:7b`; use it on 8 GB cards
+   (set `OLLAMA_MODEL` to match).
 2. Download the template:
    ```bash
    wget -O /boot/config/plugins/dockerMan/templates-user/my-mkv-autosub.xml https://raw.githubusercontent.com/lahger/unraid-subtitle-tools/main/mkv-autosub/mkv-autosub.xml
    ```
 3. *Docker → Add Container → Template: mkv-autosub*:
+   - **AppData**: e.g. `/mnt/user/appdata/mkv-autosub`
    - **Watch folder**: the same host folder MakeMKV writes its rips to
    - **Output folder**: where finished files go
    - **OLLAMA_URL**: `http://<unraid-ip>:11434`
@@ -66,7 +77,17 @@ To build the image yourself: `docker build -t mkv-autosub:latest .` in this fold
 | `DEFAULT_SUB_LANG` | `eng` | SRT shown by default; empty = none |
 | `KEEP_PGS` | `1` | `0` = SRT only |
 | `OUTPUT_SUFFIX` | `-REMUX` | added before `.mkv` in the output name; empty = original name |
+| `SOURCE_AFTER` | `keep` | `keep` = leave the rip in the watch folder, `delete` = delete it after a successful run |
 | `STABLE_MINUTES` | `5` | how long a rip must be unchanged before it's processed |
+
+## AppData (`/config`)
+
+| | |
+|---|---|
+| `autosub.log` | log of every run (also shown in the container log); rotated at 10 MB |
+| `processed.list` | rips already handled, as `path|size`. Remove a line to process that rip again. |
+| `dictionaries/` | OCR fix lists (`eng_OCRFixReplaceList.xml`, `swe_OCRFixReplaceList.xml`) and spell-check dictionaries used by "Fix common errors". Edit them to add your own corrections; updates add new files but never overwrite yours. |
+| `work/` | temporary subtitle files while a rip is processed |
 
 ## Untagged or mislabeled subtitles
 
@@ -93,9 +114,11 @@ plus tracks tagged with an `AUDIO_LANGS` language.
   film (an estimate; it was only tested on a CPU here). Movies are processed one at a time.
 - **The GPU is shared.** With `qwen2.5vl:7b`, Ollama uses about 6 GB of GPU memory while it runs. Avoid running Whisper in
   Subtitle Edit at the same time.
-- **Failures** are moved to `/watch/failed/` with a `.log` next to the file. Fix the cause and move the `.mkv`
-  back into the watch folder to retry.
-- **Output already exists**: the file is marked failed rather than overwriting anything.
+- **Failures** write `<title>-REMUX-FAILED.log` where the finished file would have gone. The rip is left
+  alone and not retried; fix the cause and delete that log to retry.
+- **Output already exists**: the rip is marked failed rather than overwriting anything.
+- While a file is being written it has a hidden temporary name (`.<title>-REMUX.mkv.partial`), so media
+  servers never pick up a half-written movie.
 - Line breaks are kept. The "Fix common errors" rules that would join two-line subtitles are
   turned off (`FCE_RULES`).
 - Disc subtitles where each line is individually flagged as forced (instead of a separate forced track)

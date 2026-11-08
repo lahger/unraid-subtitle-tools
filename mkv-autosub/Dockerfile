@@ -37,7 +37,8 @@ COPY autosub.sh /usr/local/bin/autosub.sh
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/bin/autosub.sh /entrypoint.sh
 
-ENV WATCH_DIR=/watch \
+ENV CONFIG_DIR=/config \
+    WATCH_DIR=/watch \
     OUTPUT_DIR=/output \
     SUB_LANGS=eng,swe \
     SUB_UNMATCHED=all \
@@ -50,11 +51,12 @@ ENV WATCH_DIR=/watch \
     OLLAMA_URL=http://localhost:11434 \
     OLLAMA_MODEL=qwen2.5vl:7b \
     STABLE_MINUTES=5 \
+    SOURCE_AFTER=keep \
     SCAN_INTERVAL=60 \
     OUTPUT_SUFFIX=-REMUX \
     PUID=99 \
     PGID=100 \
     UMASK=000
 
-VOLUME ["/watch", "/output"]
+VOLUME ["/config", "/watch", "/output"]
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
